@@ -1,0 +1,18 @@
+name: Teste de download (temporário)
+on:
+  push:
+    paths: ['.github/workflows/teste-download.yml']
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q -U yt-dlp
+      - name: tiktok
+        continue-on-error: true
+        run: yt-dlp -o t.mp4 "https://www.tiktok.com/@leenabhushan/video/6748451240264420610" && ls -la t.mp4
+      - name: instagram-reel
+        continue-on-error: true
+        run: yt-dlp -o i.mp4 "https://www.instagram.com/reel/CWqAgUZgCku/" && ls -la i.mp4
+      - name: instagram-post
+        continue-on-error: true
+        run: yt-dlp -o p.mp4 "https://www.instagram.com/p/aye83DjauH/" && ls -la p.mp4
