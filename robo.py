@@ -184,13 +184,25 @@ def baixa(j, pasta):
             return destino
         except Exception as e:  # noqa: BLE001
             erros.append('link direto: %s' % e)
-    try:
-        roda(['yt-dlp', '--no-playlist', '--no-progress', '-f',
-              'bv*[height<=1920][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
-              '--merge-output-format', 'mp4', '-o', destino, j['link']])
-        return destino
-    except Exception as e:  # noqa: BLE001
-        erros.append('yt-dlp: %s' % str(e)[-400:])
+    base = ['yt-dlp', '--no-playlist', '--no-progress', '-f',
+            'bv*[height<=1920][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+            '--merge-output-format', 'mp4', '-o', destino]
+    tentativas = [[]]
+    if 'youtu' in j['link']:
+        # o YouTube costuma barrar servidores; tenta outros clientes e, se houver, os cookies (secret YT_COOKIES)
+        tentativas += [['--extractor-args', 'youtube:player_client=%s' % c] for c in ('web_embedded', 'tv', 'mweb,web_safari')]
+        if os.environ.get('YT_COOKIES'):
+            cookies = os.path.join(pasta, 'cookies.txt')
+            open(cookies, 'w').write(os.environ['YT_COOKIES'])
+            tentativas.append(['--cookies', cookies])
+    for extra in tentativas:
+        try:
+            if os.path.exists(destino):
+                os.remove(destino)
+            roda(base + extra + [j['link']])
+            return destino
+        except Exception as e:  # noqa: BLE001
+            erros.append('yt-dlp %s: %s' % (' '.join(extra) or 'padrão', str(e).strip().splitlines()[-1][:200]))
     raise RuntimeError(' | '.join(erros))
 
 
