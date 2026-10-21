@@ -6,6 +6,7 @@ on:
   workflow_dispatch: {}       # botão "Run workflow" para rodar na hora
   push:
     branches: [main]          # roda também quando o robô é atualizado
+    paths-ignore: ['assets/institucional/**']
 
 concurrency:
   group: robo-reels
