@@ -1,0 +1,29 @@
+name: Robô de vídeo (Reels do Portal)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # a cada 30 minutos
+  workflow_dispatch: {}       # botão "Run workflow" para rodar na hora
+
+concurrency:
+  group: robo-reels
+  cancel-in-progress: false
+
+jobs:
+  reels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Ferramentas (ffmpeg, yt-dlp)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install -q -U yt-dlp requests pillow
+      - name: Processar fila de vídeos
+        env:
+          PORTAL_URL: ${{ secrets.PORTAL_URL }}
+          PORTAL_CHAVE: ${{ secrets.PORTAL_CHAVE }}
+        run: python robo.py
