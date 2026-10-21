@@ -3,15 +3,19 @@ on:
   push:
     paths: ['.github/workflows/teste-download.yml']
 jobs:
-  tiktok:
+  tiktok-a:
     runs-on: ubuntu-latest
     steps:
-      - run: pip install -q -U yt-dlp && yt-dlp -o t.mp4 "https://www.tiktok.com/@leenabhushan/video/6748451240264420610" && test -s t.mp4
+      - run: pip install -q -U yt-dlp && yt-dlp -o t.mp4 "https://www.tiktok.com/@patroxofficial/video/6742501081818877190" && test -s t.mp4
+  tiktok-b:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q -U yt-dlp && yt-dlp -o t.mp4 "https://www.tiktok.com/@scout2015/video/6718335390845095173" && test -s t.mp4
+  tiktok-c:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q -U yt-dlp && yt-dlp -o t.mp4 "https://www.tiktok.com/@zachking/video/7186004211437653290" && test -s t.mp4
   instagram-reel:
     runs-on: ubuntu-latest
     steps:
-      - run: pip install -q -U yt-dlp && yt-dlp -o i.mp4 "https://www.instagram.com/reel/CWqAgUZgCku/" && test -s i.mp4
-  instagram-post:
-    runs-on: ubuntu-latest
-    steps:
-      - run: pip install -q -U yt-dlp && yt-dlp -o p.mp4 "https://www.instagram.com/p/aye83DjauH/" && test -s p.mp4
+      - run: pip install -q -U yt-dlp && yt-dlp -o i.mp4 "https://www.instagram.com/reel/Chunk8-jurw/" && test -s i.mp4
