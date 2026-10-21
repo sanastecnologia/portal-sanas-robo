@@ -118,7 +118,6 @@ def fundo(quadro):
 
 def capa(quadro, j):
     img = fundo(quadro)
-    img.alpha_composite(veu(900))
     lg = logo(110)
     img.alpha_composite(lg, (70, 290))
     d = ImageDraw.Draw(img)
@@ -132,7 +131,7 @@ def capa(quadro, j):
 
 def camadas(j, pasta):
     """PNGs transparentes que o ffmpeg sobrepõe ao vídeo."""
-    fixo = veu(1000)
+    fixo = Image.new('RGBA', (W, H), (0, 0, 0, 0))
     fixo.alpha_composite(logo(96), (64, 130))
     fixo.save(os.path.join(pasta, 'fixo.png'))
     t = Image.new('RGBA', (W, H), (0, 0, 0, 0))
