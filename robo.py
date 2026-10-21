@@ -2,7 +2,7 @@
 
 Roda no GitHub Actions a cada 30 minutos:
 1. pede ao sistema (Apps Script) a fila de vídeos autorizados;
-2. baixa cada vídeo (YouTube, Instagram, TikTok... via yt-dlp, ou o link direto da API);
+2. baixa cada vídeo do Instagram (via yt-dlp, ou o link direto quando houver);
 3. edita no padrão Portal (tarja, logo, crédito, encerramento) e gera a capa;
 4. devolve vídeo + capa ao sistema, que cria o post do Reels para aprovação.
 """
@@ -187,14 +187,7 @@ def baixa(j, pasta):
     base = ['yt-dlp', '--no-playlist', '--no-progress', '-f',
             'bv*[height<=1920][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
             '--merge-output-format', 'mp4', '-o', destino]
-    tentativas = [[]]
-    if 'youtu' in j['link']:
-        # o YouTube costuma barrar servidores; tenta outros clientes e, se houver, os cookies (secret YT_COOKIES)
-        tentativas += [['--extractor-args', 'youtube:player_client=%s' % c] for c in ('web_embedded', 'tv', 'mweb,web_safari')]
-        if os.environ.get('YT_COOKIES'):
-            cookies = os.path.join(pasta, 'cookies.txt')
-            open(cookies, 'w').write(os.environ['YT_COOKIES'])
-            tentativas.append(['--cookies', cookies])
+    tentativas = [[]]   # YouTube e TikTok ficam fora: bloqueiam servidores
     for extra in tentativas:
         try:
             if os.path.exists(destino):

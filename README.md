@@ -3,7 +3,7 @@
 A cada 30 minutos, o GitHub Actions roda `robo.py`:
 
 1. pede ao sistema do Portal (Apps Script) os vídeos marcados como **Autorizado**;
-2. baixa o vídeo (YouTube, Instagram, TikTok… via `yt-dlp`, ou o link direto da API do Instagram);
+2. baixa o vídeo do **Instagram** (Reel ou post, via `yt-dlp`). YouTube e TikTok bloqueiam servidores e ficam fora: para TikTok, suba o arquivo pelo Estúdio do painel;
 3. edita no padrão Portal: tarja, logo, crédito da fonte e encerramento "Siga @portalsanas", e gera a capa 9:16 (com a área do grid 3:4 respeitada);
 4. devolve vídeo e capa ao sistema, que cria o post do Reels em **Posts › Para aprovar**.
 
@@ -15,8 +15,6 @@ Em **Settings › Secrets and variables › Actions › New repository secret**:
 
 - `PORTAL_URL`: URL do app da Web do Apps Script (termina em `/exec`)
 - `PORTAL_CHAVE`: a chave do painel (aba Config da planilha, `CHAVE_PAINEL`)
-
-Opcional, para o YouTube (que bloqueia servidores): `YT_COOKIES` com o conteúdo do arquivo cookies.txt exportado de uma conta Google **secundária** logada no youtube.com. Os cookies vencem de tempos em tempos e precisam ser renovados.
 
 Para rodar na hora: **Actions › Robô de vídeo › Run workflow**.
 

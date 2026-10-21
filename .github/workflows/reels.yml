@@ -28,5 +28,4 @@ jobs:
         env:
           PORTAL_URL: ${{ secrets.PORTAL_URL }}
           PORTAL_CHAVE: ${{ secrets.PORTAL_CHAVE }}
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}   # opcional: cookies do YouTube (conta secundária)
         run: python robo.py
