@@ -16,6 +16,8 @@ Em **Settings › Secrets and variables › Actions › New repository secret**:
 - `PORTAL_URL`: URL do app da Web do Apps Script (termina em `/exec`)
 - `PORTAL_CHAVE`: a chave do painel (aba Config da planilha, `CHAVE_PAINEL`)
 
+Opcional, para o YouTube (que bloqueia servidores): `YT_COOKIES` com o conteúdo do arquivo cookies.txt exportado de uma conta Google **secundária** logada no youtube.com. Os cookies vencem de tempos em tempos e precisam ser renovados.
+
 Para rodar na hora: **Actions › Robô de vídeo › Run workflow**.
 
 Teste local: `python robo.py teste video.mp4 pasta_saida`
