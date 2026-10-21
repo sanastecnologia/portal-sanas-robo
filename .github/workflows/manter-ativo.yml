@@ -1,0 +1,19 @@
+name: Manter o robô ativo
+# O GitHub desliga agendamentos de repositórios sem atividade por 60 dias.
+# Este passo faz um registro vazio todo dia 1º para o robô nunca parar.
+on:
+  schedule:
+    - cron: '0 12 1 * *'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  manter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git config user.name "Robô Portal Sanas"
+          git config user.email "robo@portalsanas.local"
+          git commit --allow-empty -m "Manter o robô ativo ($(date +%Y-%m))"
+          git push
