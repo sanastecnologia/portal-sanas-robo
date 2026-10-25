@@ -9,12 +9,17 @@ Roda no GitHub Actions a cada 30 minutos:
 import base64
 import json
 import os
+import random
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+import noticia
 
 URL = os.environ.get('PORTAL_URL', '')
 CHAVE = os.environ.get('PORTAL_CHAVE', '')
@@ -23,6 +28,7 @@ W, H = 1080, 1920
 AZUL, ESC, TEXTO, BRANCO = (0, 83, 206), (10, 37, 80), (17, 20, 24), (255, 255, 255)
 FIM = 2.5           # segundos do encerramento
 LIMITE_MB = 20      # tamanho máximo do vídeo final (o Apps Script recebe até ~50 MB em base64)
+MUSICA_VOL = 0.30   # música de fundo baixa (só entra em vídeo sem áudio próprio)
 
 
 def fonte(peso, tam):
@@ -200,72 +206,111 @@ def baixa(j, pasta):
     raise RuntimeError(' | '.join(erros))
 
 
-FOTO_S, CENA_S = 5.0, 4.0   # notícia: 5s de foto com o título + 4s por arte
-
-
 def baixa_img(url, destino):
+    if os.path.exists(url):     # teste local com arquivo
+        shutil.copy(url, destino)
+        return destino
     r = requests.get(url, timeout=120)
     r.raise_for_status()
-    open(destino, 'wb').write(r.content)
-    Image.open(destino).convert('RGB').save(destino, quality=95)
+    open(destino, 'wb').write(r.content)   # guarda o original (o EXIF diz se a foto é antiga)
     return destino
 
 
-def monta_noticia(j, pasta):
-    """Monta o vídeo-base do Reels de notícia (sem áudio); o edita() põe logo, tarja e encerramento."""
-    enc = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '30', '-an']
-    partes = []
-    foto = baixa_img(j['foto'], os.path.join(pasta, 'foto.jpg'))
-    p0 = os.path.join(pasta, 'p0.mp4')
-    n = int(FOTO_S * 30)
-    roda(['ffmpeg', '-y', '-loop', '1', '-i', foto, '-vf',
-          'scale=1296:2304:force_original_aspect_ratio=increase,crop=1296:2304,'
-          "zoompan=z='min(zoom+0.0011,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=%d:s=%dx%d:fps=30,setsar=1" % (n, W, H),
-          '-frames:v', str(n)] + enc + [p0])
-    partes.append(p0)
-    for i, url in enumerate(j.get('slides', [])[:2]):
-        img = baixa_img(url, os.path.join(pasta, 's%d.jpg' % i))
-        pi = os.path.join(pasta, 'p%d.mp4' % (i + 1))
-        n = int(CENA_S * 30)
-        roda(['ffmpeg', '-y', '-loop', '1', '-i', img, '-filter_complex',
-              '[0:v]split[a][b];[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,boxblur=40:2,eq=brightness=-0.3[bg];'
-              "[b]scale=1000:-2,zoompan=z='min(zoom+0.0006,1.05)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=%d:s=1000x1250:fps=30[fg];"
-              '[bg][fg]overlay=(W-w)/2:(H-h)/2-40,setsar=1' % (W, H, W, H, n),
-              '-frames:v', str(n)] + enc + [pi])
-        partes.append(pi)
-    lista = os.path.join(pasta, 'lista.txt')
-    open(lista, 'w').write(''.join("file '%s'\n" % p for p in partes))
+# ---------------------------------------------------------------- música
+MUSICAS = os.environ.get('ROBO_MUSICAS') or os.path.join(AQUI, 'assets', 'musica')
+
+
+def estima_batida(arq):
+    """Batida da faixa (s) e o instante da 1ª batida forte, pela autocorrelação da energia. Sem numpy: 120 bpm."""
+    try:
+        import numpy as np
+        sr, hop = 11025, 256
+        pcm = subprocess.run(['ffmpeg', '-v', 'error', '-t', '60', '-i', arq, '-ac', '1', '-ar', str(sr), '-f', 's16le', '-'],
+                             capture_output=True, check=True).stdout
+        x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+        n = len(x) // hop
+        e = np.log(np.sqrt((x[:n * hop].reshape(n, hop) ** 2).mean(axis=1)) + 1e-3)
+        o = np.maximum(np.diff(e), 0)
+        o -= o.mean()
+        ac = np.correlate(o, o, 'full')[len(o) - 1:]
+        lags = np.arange(len(ac))
+        bpm = 60 * sr / hop / np.maximum(lags, 1)
+        ok = (bpm >= 70) & (bpm <= 160)
+        lag = int(lags[ok][np.argmax(ac[ok])])
+        a, b, c = ac[lag - 1], ac[lag], ac[lag + 1]
+        fino = lag + 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c else lag   # pico entre dois quadros
+        fase = max(range(lag), key=lambda k: o[k::lag].sum())
+        return fino * hop / sr, fase * hop / sr
+    except Exception as e:  # noqa: BLE001
+        print('  batida: não deu para medir (%s), usando 120 bpm' % e)
+        return 0.5, 0.0
+
+
+def escolhe_musica(j):
+    """Sorteia uma faixa livre de direitos de assets/musica/ (o nome pode trazer o bpm: 'faixa_120bpm.mp3')."""
+    if not os.path.isdir(MUSICAS):
+        return None
+    faixas = sorted(f for f in os.listdir(MUSICAS) if f.lower().endswith(('.mp3', '.m4a', '.wav', '.aac', '.ogg')))
+    if not faixas:
+        return None
+    nome = random.Random(str(j.get('id'))).choice(faixas)
+    arq = os.path.join(MUSICAS, nome)
+    m = re.search(r'(\d{2,3})\s*bpm', nome, re.I)
+    batida, inicio = (60 / int(m.group(1)), 0.0) if m else estima_batida(arq)
+    print('  música: %s (%.0f bpm)' % (nome, 60 / batida))
+    return {'arq': arq, 'batida': batida, 'inicio': inicio}
+
+
+def monta_noticia(j, pasta, musica=None):
+    """Reels de notícia v2: cenas próprias em 9:16 (noticia.py). Sai sem áudio; o edita() põe logo, encerramento e música."""
+    foto = baixa_img(j['foto'], os.path.join(pasta, 'foto-original'))
     origem = os.path.join(pasta, 'origem.mp4')
-    roda(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', lista, '-c', 'copy', origem])
-    j['tarjaAte'] = FOTO_S
+    total, cp, modo, cenas = noticia.monta(j, foto, origem, (musica or {}).get('batida', 0.5), FIM)
+    cp = cp.convert('RGBA')
+    cp.alpha_composite(logo(110), (70, 290))      # capa: logo dentro da área do grid 3:4
+    cp.convert('RGB').save(os.path.join(pasta, 'capa.jpg'), quality=92)
+    j['capaPronta'] = j['soLogo'] = True
+    print('  foto: %s · cenas: %s · %.1f s + encerramento' % (modo, ', '.join('%s %.2fs' % c for c in cenas), total))
     return origem
 
 
-def edita(j, origem, pasta):
+def edita(j, origem, pasta, musica=None):
     w, h, dur, tem_audio = sonda(origem)
     dur = min(dur, 170.0)  # Reels via API: até 3 min com o encerramento
     total = dur + FIM - 0.4
     camadas(j, pasta)
     q = os.path.join(pasta, 'quadro.png')
-    roda(['ffmpeg', '-y', '-ss', str(min(dur / 3, 3)), '-i', origem, '-frames:v', '1', q])
-    capa(Image.open(q).convert('RGB'), j).save(os.path.join(pasta, 'capa.jpg'), quality=92)
+    if not j.get('capaPronta'):
+        roda(['ffmpeg', '-y', '-ss', str(min(dur / 3, 3)), '-i', origem, '-frames:v', '1', q])
+        capa(Image.open(q).convert('RGB'), j).save(os.path.join(pasta, 'capa.jpg'), quality=92)
+    musica = musica if not tem_audio else None
 
     if w / h <= 0.75:
         base = '[0:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1[bg]' % (W, H, W, H)
     else:
         base = ('[0:v]split[a][b];[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,boxblur=40:2,'
                 'eq=brightness=-0.25[b0];[b]scale=%d:-2[fg];[b0][fg]overlay=0:(H-h)/2-140,setsar=1[bg]') % (W, H, W, H, W)
-    filtro = ';'.join([
-        base,
-        '[bg][1:v]overlay=0:0[v1]',
-        '[2:v]format=rgba,fade=t=in:st=0.3:d=0.6:alpha=1[tj]',
-        "[v1][tj]overlay=x='-120*pow(1-min(max((t-0.3)/0.6,0),1),3)':y=0%s[v2]" % (":enable='lt(t,%.2f)'" % j['tarjaAte'] if j.get('tarjaAte') else ''),
-        '[3:v]format=rgba,fade=t=in:st=0.8:d=0.4:alpha=1[cr]',
-        '[v2][cr]overlay=0:0%s,fps=30,format=yuv420p,trim=duration=%.3f,setpts=PTS-STARTPTS[main]' % ((":enable='lt(t,%.2f)'" % j['tarjaAte']) if j.get('tarjaAte') else '', dur),
-        '[4:v]fps=30,format=yuv420p,setsar=1,trim=duration=%.3f,setpts=PTS-STARTPTS[fim]' % FIM,
+    ate = (":enable='lt(t,%.2f)'" % j['tarjaAte']) if j.get('tarjaAte') else ''
+    if j.get('soLogo'):     # notícia v2: manchete e fonte já vêm desenhadas nas cenas
+        camadas_v = ['[bg][1:v]overlay=0:0,fps=30,format=yuv420p,trim=duration=%.3f,setpts=PTS-STARTPTS,fps=30[main]' % dur]
+    else:
+        camadas_v = [
+            '[bg][1:v]overlay=0:0[v1]',
+            '[2:v]format=rgba,fade=t=in:st=0.3:d=0.6:alpha=1[tj]',
+            "[v1][tj]overlay=x='-120*pow(1-min(max((t-0.3)/0.6,0),1),3)':y=0%s[v2]" % ate,
+            '[3:v]format=rgba,fade=t=in:st=0.8:d=0.4:alpha=1[cr]',
+            '[v2][cr]overlay=0:0%s,fps=30,format=yuv420p,trim=duration=%.3f,setpts=PTS-STARTPTS,fps=30[main]' % (ate, dur)]
+    if tem_audio:
+        audio = '[0:a]atrim=0:%.3f,asetpts=PTS-STARTPTS,afade=t=out:st=%.3f:d=0.8,apad,atrim=0:%.3f[a]' % (dur, max(dur - 0.8, 0), total)
+    elif musica:
+        audio = ('[5:a]volume=%.2f,afade=t=in:st=0:d=0.15,afade=t=out:st=%.3f:d=1.2,apad,atrim=0:%.3f,asetpts=PTS-STARTPTS[a]'
+                 % (MUSICA_VOL, max(total - 1.2, 0), total))
+    else:
+        audio = '[5:a]atrim=0:%.3f[a]' % total
+    filtro = ';'.join([base] + camadas_v + [
+        '[4:v]fps=30,format=yuv420p,setsar=1,trim=duration=%.3f,setpts=PTS-STARTPTS,fps=30[fim]' % FIM,
         '[main][fim]xfade=transition=fade:duration=0.4:offset=%.3f[v]' % (dur - 0.4),
-        '[%s]atrim=0:%.3f,asetpts=PTS-STARTPTS,afade=t=out:st=%.3f:d=0.8,apad,atrim=0:%.3f[a]'
-        % ('0:a' if tem_audio else '5:a', dur, max(dur - 0.8, 0), total),
+        audio,
     ])
     kbps = max(1500, min(6000, int(LIMITE_MB * 8 * 1024 / total) - 160))
     cmd = ['ffmpeg', '-y', '-i', origem,
@@ -274,7 +319,8 @@ def edita(j, origem, pasta):
            '-loop', '1', '-i', os.path.join(pasta, 'cred.png'),
            '-loop', '1', '-t', str(FIM), '-i', os.path.join(pasta, 'fim.png')]
     if not tem_audio:
-        cmd += ['-f', 'lavfi', '-t', str(total), '-i', 'anullsrc=r=44100:cl=stereo']
+        cmd += (['-ss', '%.3f' % musica['inicio'], '-i', musica['arq']] if musica
+                else ['-f', 'lavfi', '-t', str(total), '-i', 'anullsrc=r=44100:cl=stereo'])
     saida = os.path.join(pasta, 'reels.mp4')
     cmd += ['-filter_complex', filtro, '-map', '[v]', '-map', '[a]', '-t', '%.3f' % total,
             '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'medium', '-b:v', '%dk' % kbps,
@@ -305,8 +351,9 @@ def main():
         print('→', j['id'], j['link'])
         with tempfile.TemporaryDirectory() as pasta:
             try:
-                origem = monta_noticia(j, pasta) if j.get('tipo') == 'noticia' else baixa(j, pasta)
-                video, cp = edita(j, origem, pasta)
+                musica = escolhe_musica(j)
+                origem = monta_noticia(j, pasta, musica) if j.get('tipo') == 'noticia' else baixa(j, pasta)
+                video, cp = edita(j, origem, pasta, musica)
                 mb = os.path.getsize(video) / 1e6
                 print('  editado: %.1f MB' % mb)
                 r = chama_sistema({'robo': 'reels', 'id': j['id'],
@@ -319,7 +366,15 @@ def main():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 2 and sys.argv[1] == 'teste':
+    if len(sys.argv) > 2 and sys.argv[1] == 'noticia':
+        # teste local do reels de notícia: python robo.py noticia exemplo.json [pasta_saida]
+        j = json.load(open(sys.argv[2], encoding='utf-8'))
+        saida = sys.argv[3] if len(sys.argv) > 3 else '.'
+        os.makedirs(saida, exist_ok=True)
+        m = escolhe_musica(j)
+        v, c = edita(j, monta_noticia(j, saida, m), saida, m)
+        print(v, c, sonda(v))
+    elif len(sys.argv) > 2 and sys.argv[1] == 'teste':
         # teste local: python robo.py teste video.mp4 [pasta_saida]
         j = {'id': 'teste', 'titulo': 'Capitão Jack Sparrow é visto andando pelas ruas de SJC',
              'chamada': 'São José dos Campos', 'credito': 'Vídeo: Cabeça GG'}
