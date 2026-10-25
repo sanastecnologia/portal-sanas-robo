@@ -146,6 +146,8 @@ def camadas(j, pasta):
     d = ImageDraw.Draw(fim)
     d.text((W / 2, 1080), 'Siga @portalsanas', font=fonte('bold', 64), fill=BRANCO, anchor='ms')
     d.text((W / 2, 1150), 'Os negócios de São José dos Campos e região', font=fonte('medium', 38), fill=BRANCO, anchor='ms')
+    if j.get('tipo') == 'noticia':
+        d.text((W / 2, 1320), 'Manda pra quem precisa saber', font=fonte('bold', 46), fill=BRANCO, anchor='ms')
     if j.get('credito'):
         d.text((W / 2, 1240), j['credito'], font=fonte('medium', 30), fill=(225, 233, 248), anchor='ms')
     fim.save(os.path.join(pasta, 'fim.png'))
@@ -198,6 +200,47 @@ def baixa(j, pasta):
     raise RuntimeError(' | '.join(erros))
 
 
+FOTO_S, CENA_S = 5.0, 4.0   # notícia: 5s de foto com o título + 4s por arte
+
+
+def baixa_img(url, destino):
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    open(destino, 'wb').write(r.content)
+    Image.open(destino).convert('RGB').save(destino, quality=95)
+    return destino
+
+
+def monta_noticia(j, pasta):
+    """Monta o vídeo-base do Reels de notícia (sem áudio); o edita() põe logo, tarja e encerramento."""
+    enc = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '30', '-an']
+    partes = []
+    foto = baixa_img(j['foto'], os.path.join(pasta, 'foto.jpg'))
+    p0 = os.path.join(pasta, 'p0.mp4')
+    n = int(FOTO_S * 30)
+    roda(['ffmpeg', '-y', '-loop', '1', '-i', foto, '-vf',
+          'scale=1296:2304:force_original_aspect_ratio=increase,crop=1296:2304,'
+          "zoompan=z='min(zoom+0.0011,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=%d:s=%dx%d:fps=30,setsar=1" % (n, W, H),
+          '-frames:v', str(n)] + enc + [p0])
+    partes.append(p0)
+    for i, url in enumerate(j.get('slides', [])[:2]):
+        img = baixa_img(url, os.path.join(pasta, 's%d.jpg' % i))
+        pi = os.path.join(pasta, 'p%d.mp4' % (i + 1))
+        n = int(CENA_S * 30)
+        roda(['ffmpeg', '-y', '-loop', '1', '-i', img, '-filter_complex',
+              '[0:v]split[a][b];[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,boxblur=40:2,eq=brightness=-0.3[bg];'
+              "[b]scale=1000:-2,zoompan=z='min(zoom+0.0006,1.05)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=%d:s=1000x1250:fps=30[fg];"
+              '[bg][fg]overlay=(W-w)/2:(H-h)/2-40,setsar=1' % (W, H, W, H, n),
+              '-frames:v', str(n)] + enc + [pi])
+        partes.append(pi)
+    lista = os.path.join(pasta, 'lista.txt')
+    open(lista, 'w').write(''.join("file '%s'\n" % p for p in partes))
+    origem = os.path.join(pasta, 'origem.mp4')
+    roda(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', lista, '-c', 'copy', origem])
+    j['tarjaAte'] = FOTO_S
+    return origem
+
+
 def edita(j, origem, pasta):
     w, h, dur, tem_audio = sonda(origem)
     dur = min(dur, 170.0)  # Reels via API: até 3 min com o encerramento
@@ -216,9 +259,9 @@ def edita(j, origem, pasta):
         base,
         '[bg][1:v]overlay=0:0[v1]',
         '[2:v]format=rgba,fade=t=in:st=0.3:d=0.6:alpha=1[tj]',
-        "[v1][tj]overlay=x='-120*pow(1-min(max((t-0.3)/0.6,0),1),3)':y=0[v2]",
+        "[v1][tj]overlay=x='-120*pow(1-min(max((t-0.3)/0.6,0),1),3)':y=0%s[v2]" % (":enable='lt(t,%.2f)'" % j['tarjaAte'] if j.get('tarjaAte') else ''),
         '[3:v]format=rgba,fade=t=in:st=0.8:d=0.4:alpha=1[cr]',
-        '[v2][cr]overlay=0:0,fps=30,format=yuv420p,trim=duration=%.3f,setpts=PTS-STARTPTS[main]' % dur,
+        '[v2][cr]overlay=0:0%s,fps=30,format=yuv420p,trim=duration=%.3f,setpts=PTS-STARTPTS[main]' % ((":enable='lt(t,%.2f)'" % j['tarjaAte']) if j.get('tarjaAte') else '', dur),
         '[4:v]fps=30,format=yuv420p,setsar=1,trim=duration=%.3f,setpts=PTS-STARTPTS[fim]' % FIM,
         '[main][fim]xfade=transition=fade:duration=0.4:offset=%.3f[v]' % (dur - 0.4),
         '[%s]atrim=0:%.3f,asetpts=PTS-STARTPTS,afade=t=out:st=%.3f:d=0.8,apad,atrim=0:%.3f[a]'
@@ -262,7 +305,7 @@ def main():
         print('→', j['id'], j['link'])
         with tempfile.TemporaryDirectory() as pasta:
             try:
-                origem = baixa(j, pasta)
+                origem = monta_noticia(j, pasta) if j.get('tipo') == 'noticia' else baixa(j, pasta)
                 video, cp = edita(j, origem, pasta)
                 mb = os.path.getsize(video) / 1e6
                 print('  editado: %.1f MB' % mb)
