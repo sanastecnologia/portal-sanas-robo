@@ -16,6 +16,16 @@ gancho (foto com movimento suave + manchete palavra por palavra) → o fato → 
 - O servidor só manda notícias para o robô com `REELS_NOTICIA_V2 = sim` na Config.
 - Teste local: `python robo.py noticia exemplo.json pasta_saida` (o JSON tem os campos que o `cenasNoticia_` do sistema manda).
 
+## Entrevista gravada
+
+No painel: **+ Adicionar › Entrevista gravada**. O vídeo sobe direto para o Drive e entra na fila como **Autorizado** (com a confirmação de autorização de imagem).
+O robô baixa do Drive, transcreve com `faster-whisper` (modelo `small`, instalado só quando há entrevista na fila), manda a transcrição ao sistema,
+que escolhe o trecho de 30 a 60 s (ou usa o vídeo inteiro / o trecho que o Pedro marcou) e escreve manchete e legenda. O robô corta, aplica o modelo
+(tarja com a manchete, rótulo azul com o nome, pílula com cargo · empresa, logo e encerramento) e o Reels vai para **Para aprovar**, com o @ do entrevistado como colaborador.
+A transcrição completa fica no Drive (pasta dos posts) para matéria e outros cortes.
+
+Teste local: `python robo.py entrevista video.mp4 pasta_saida [inicio fim]`
+
 ## Música
 
 Faixas livres de direitos em `assets/musica/` (mp3, m4a, wav). O robô sorteia uma por vídeo, em volume baixo, só em vídeo sem áudio próprio.

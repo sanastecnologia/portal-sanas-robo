@@ -330,6 +330,65 @@ def edita(j, origem, pasta, musica=None):
     return saida, os.path.join(pasta, 'capa.jpg')
 
 
+# ---------------------------------------------------------------- entrevista gravada (upload no painel)
+WHISPER = os.environ.get('ROBO_WHISPER', 'small')   # modelo do faster-whisper (tiny, base, small, medium)
+
+
+def baixa_drive(arq_id, pasta):
+    """Baixa o arquivo enviado pelo painel (compartilhado por link) direto do Drive, sem carregar tudo na memória."""
+    destino = os.path.join(pasta, 'entrevista-original')
+    url = 'https://drive.usercontent.google.com/download'
+    with requests.get(url, params={'id': arq_id, 'export': 'download', 'confirm': 't'}, stream=True, timeout=600) as r:
+        r.raise_for_status()
+        if 'text/html' in r.headers.get('Content-Type', ''):
+            raise RuntimeError('o Drive não liberou o download do arquivo (confira se está compartilhado por link)')
+        with open(destino, 'wb') as f:
+            for parte in r.iter_content(8 << 20):
+                f.write(parte)
+    print('  baixado: %.0f MB' % (os.path.getsize(destino) / 1e6))
+    return destino
+
+
+def transcreve(origem, pasta):
+    """Transcrição com tempos (faster-whisper, roda no próprio GitHub Actions, sem custo). Devolve [[início, fim, texto], ...]."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'faster-whisper'], check=True)
+        from faster_whisper import WhisperModel
+    wav = os.path.join(pasta, 'audio.wav')
+    roda(['ffmpeg', '-y', '-v', 'error', '-i', origem, '-vn', '-ac', '1', '-ar', '16000', wav])
+    modelo = WhisperModel(WHISPER, device='cpu', compute_type='int8')
+    segs, _ = modelo.transcribe(wav, language='pt', vad_filter=True, beam_size=1)
+    out = [[round(sg.start, 2), round(sg.end, 2), sg.text.strip()] for sg in segs if sg.text.strip()]
+    print('  transcrição: %d trechos' % len(out))
+    return out
+
+
+def corta(origem, ini, fim, pasta):
+    """Recorta o trecho escolhido (corte exato) e reduz para no máximo 1080 px no lado menor, para a edição ficar leve."""
+    saida = os.path.join(pasta, 'origem.mp4')
+    escala = "scale='if(gt(iw,ih),-2,min(1080,iw))':'if(gt(iw,ih),min(1080,ih),-2)'"
+    roda(['ffmpeg', '-y', '-v', 'error', '-ss', '%.2f' % ini, '-i', origem, '-t', '%.2f' % (fim - ini), '-vf', escala,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', saida])
+    return saida
+
+
+def monta_entrevista(j, pasta):
+    """Entrevista: baixa do Drive, transcreve, o sistema escolhe o trecho e os textos, e recorta. O edita() aplica o modelo."""
+    original = baixa_drive(j['drive'], pasta)
+    _, _, dur, tem_audio = sonda(original)
+    segs = transcreve(original, pasta) if tem_audio else []
+    r = chama_sistema({'robo': 'transcricao', 'id': j['id'], 'duracao': dur, 'segmentos': segs})
+    if not r.get('ok'):
+        raise RuntimeError('sistema não devolveu o trecho: %s' % r)
+    j.update(titulo=r['titulo'], chamada=r.get('chamada', ''), credito=r.get('credito', ''))
+    print('  trecho: %.1f s a %.1f s · %s' % (r['inicio'], r['fim'], r['titulo']))
+    cortado = corta(original, float(r['inicio']), float(r['fim']), pasta)
+    os.remove(original)
+    return cortado
+
+
 # ---------------------------------------------------------------- conversa com o sistema
 def chama_sistema(dados):
     dados = dict(dados, robo=dados.get('robo', 'reels'), chave=CHAVE)
@@ -348,11 +407,16 @@ def main():
         sys.exit('Sistema respondeu: %s' % fila)
     print('Vídeos na fila: %d' % len(fila))
     for j in fila:
-        print('→', j['id'], j['link'])
+        print('→', j['id'], j.get('link') or j.get('tipo', ''))
         with tempfile.TemporaryDirectory() as pasta:
             try:
                 musica = escolhe_musica(j)
-                origem = monta_noticia(j, pasta, musica) if j.get('tipo') == 'noticia' else baixa(j, pasta)
+                if j.get('tipo') == 'noticia':
+                    origem = monta_noticia(j, pasta, musica)
+                elif j.get('tipo') == 'entrevista':
+                    origem = monta_entrevista(j, pasta)
+                else:
+                    origem = baixa(j, pasta)
                 video, cp = edita(j, origem, pasta, musica)
                 mb = os.path.getsize(video) / 1e6
                 print('  editado: %.1f MB' % mb)
@@ -373,6 +437,16 @@ if __name__ == '__main__':
         os.makedirs(saida, exist_ok=True)
         m = escolhe_musica(j)
         v, c = edita(j, monta_noticia(j, saida, m), saida, m)
+        print(v, c, sonda(v))
+    elif len(sys.argv) > 2 and sys.argv[1] == 'entrevista':
+        # teste local: python robo.py entrevista video.mp4 [pasta_saida] [inicio fim]  (transcreve e aplica o modelo, sem o sistema)
+        saida = sys.argv[3] if len(sys.argv) > 3 else '.'
+        os.makedirs(saida, exist_ok=True)
+        ini, fim = (float(sys.argv[4]), float(sys.argv[5])) if len(sys.argv) > 5 else (0.0, min(sonda(sys.argv[2])[2], 45.0))
+        print('\n'.join('[%.1f] %s' % (a, t) for a, _, t in transcreve(sys.argv[2], saida)[:40]))
+        j = {'id': 'teste', 'tipo': 'entrevista', 'titulo': 'Do primeiro cliente à segunda unidade em SJC',
+             'chamada': 'Lucas Almeida', 'credito': 'Fundador · Brother Banho'}
+        v, c = edita(j, corta(sys.argv[2], ini, fim, saida), saida)
         print(v, c, sonda(v))
     elif len(sys.argv) > 2 and sys.argv[1] == 'teste':
         # teste local: python robo.py teste video.mp4 [pasta_saida]
