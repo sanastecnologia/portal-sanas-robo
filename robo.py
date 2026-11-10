@@ -154,8 +154,12 @@ def camadas(j, pasta):
     d.text((W / 2, 1150), 'Os negócios de São José dos Campos e região', font=fonte('medium', 38), fill=BRANCO, anchor='ms')
     if j.get('tipo') == 'noticia':
         d.text((W / 2, 1320), 'Manda pra quem precisa saber', font=fonte('bold', 46), fill=BRANCO, anchor='ms')
-    if j.get('credito'):
-        d.text((W / 2, 1240), j['credito'], font=fonte('medium', 30), fill=(225, 233, 248), anchor='ms')
+    rodape = j.get('credito', '')
+    if j.get('tipo') == 'entrevista' and j.get('chamada'):   # entrevista: quem falou, e não só o cargo solto
+        emp = rodape.split(' · ')[-1] if ' · ' in rodape else ''
+        rodape = 'Entrevista com ' + j['chamada'] + (' · ' + emp if emp else '')
+    if rodape:
+        d.text((W / 2, 1240), rodape, font=fonte('medium', 30), fill=(225, 233, 248), anchor='ms')
     fim.save(os.path.join(pasta, 'fim.png'))
 
 
