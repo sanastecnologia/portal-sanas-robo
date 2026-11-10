@@ -357,9 +357,15 @@ def transcreve(origem, pasta):
         subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'faster-whisper'], check=True)
         from faster_whisper import WhisperModel
     wav = os.path.join(pasta, 'audio.wav')
-    roda(['ffmpeg', '-y', '-v', 'error', '-i', origem, '-vn', '-ac', '1', '-ar', '16000', wav])
+    roda(['ffmpeg', '-y', '-v', 'error', '-i', origem, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav])
+    # Lê o WAV aqui (numpy) e entrega o áudio pronto: assim o faster-whisper não chama av.open(),
+    # que quebra com versões novas do PyAV ("unexpected keyword argument 'metadata_errors'").
+    import wave
+    import numpy as np
+    with wave.open(wav, 'rb') as w:
+        audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
     modelo = WhisperModel(WHISPER, device='cpu', compute_type='int8')
-    segs, _ = modelo.transcribe(wav, language='pt', vad_filter=True, beam_size=1)
+    segs, _ = modelo.transcribe(audio, language='pt', vad_filter=True, beam_size=1)
     out = [[round(sg.start, 2), round(sg.end, 2), sg.text.strip()] for sg in segs if sg.text.strip()]
     print('  transcrição: %d trechos' % len(out))
     return out
