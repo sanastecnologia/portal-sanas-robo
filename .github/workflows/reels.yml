@@ -30,3 +30,11 @@ jobs:
           PORTAL_URL: ${{ secrets.PORTAL_URL }}
           PORTAL_CHAVE: ${{ secrets.PORTAL_CHAVE }}
         run: python robo.py
+      - name: Guardar vídeos editados para revisão
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: revisao
+          path: revisao/
+          retention-days: 5
+          if-no-files-found: ignore

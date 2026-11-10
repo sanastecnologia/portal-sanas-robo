@@ -368,6 +368,8 @@ def transcreve(origem, pasta):
     segs, _ = modelo.transcribe(audio, language='pt', vad_filter=True, beam_size=1)
     out = [[round(sg.start, 2), round(sg.end, 2), sg.text.strip()] for sg in segs if sg.text.strip()]
     print('  transcrição: %d trechos' % len(out))
+    for a, b, t in out:
+        print('    [%.2f–%.2f] %s' % (a, b, t))
     return out
 
 
@@ -426,6 +428,9 @@ def main():
                 video, cp = edita(j, origem, pasta, musica)
                 mb = os.path.getsize(video) / 1e6
                 print('  editado: %.1f MB' % mb)
+                os.makedirs('revisao', exist_ok=True)          # cópia para revisão (artefato do GitHub Actions)
+                shutil.copy(video, os.path.join('revisao', '%s.mp4' % j['id']))
+                shutil.copy(cp, os.path.join('revisao', '%s.jpg' % j['id']))
                 r = chama_sistema({'robo': 'reels', 'id': j['id'],
                                    'video': base64.b64encode(open(video, 'rb').read()).decode(),
                                    'capa': base64.b64encode(open(cp, 'rb').read()).decode()})
