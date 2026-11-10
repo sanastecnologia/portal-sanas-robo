@@ -404,7 +404,7 @@ def monta_entrevista(j, pasta):
 # ---------------------------------------------------------------- conversa com o sistema
 def chama_sistema(dados):
     dados = dict(dados, robo=dados.get('robo', 'reels'), chave=CHAVE)
-    r = requests.post(URL, data=json.dumps(dados), headers={'Content-Type': 'text/plain'}, timeout=300)
+    r = requests.post(URL, data=json.dumps(dados), headers={'Content-Type': 'text/plain'}, timeout=400)  # Apps Script pode levar até 6 min
     try:
         return r.json()
     except Exception:  # noqa: BLE001
